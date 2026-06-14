@@ -1,45 +1,56 @@
 ---
 # handlers file for update
+#
+# Ansible does not support a "block" as a handler, so reboot detection is split
+# into several handlers that all "listen" to the "Reboot" topic (triggered by
+# "notify: Reboot"). Handlers run in definition order, so the detection steps
+# run before the actual reboot.
+
+- name: Determine reboot-required marker (Debian/Ubuntu)
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: update_reboot_marker
+  listen: Reboot
+  when:
+    - update_reboot
+    - update_reboot_only_if_required
+    - ansible_connection not in [ "container", "docker", "community.docker.docker" ]
+    - ansible_facts['pkg_mgr'] == "apt"
+
+- name: Ensure needs-restarting is available (RedHat family)
+  ansible.builtin.package:
+    name: "{{ 'yum-utils' if ansible_facts['pkg_mgr'] == 'yum' else 'dnf-utils' }}"
+    state: present
+  listen: Reboot
+  when:
+    - update_reboot
+    - update_reboot_only_if_required
+    - ansible_connection not in [ "container", "docker", "community.docker.docker" ]
+    - ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
+
+- name: Determine needs-restarting (RedHat family)
+  ansible.builtin.command:
+    cmd: needs-restarting -r
+  register: update_needs_restarting
+  changed_when: false
+  failed_when:
+    - update_needs_restarting.rc not in [ 0, 1 ]
+  listen: Reboot
+  when:
+    - update_reboot
+    - update_reboot_only_if_required
+    - ansible_connection not in [ "container", "docker", "community.docker.docker" ]
+    - ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
 
 - name: Reboot
+  ansible.builtin.reboot:
   when:
     - update_reboot
     - ansible_connection not in [ "container", "docker", "community.docker.docker" ]
-  block:
-    - name: Determine whether a reboot is required
-      when:
-        - update_reboot_only_if_required
-      block:
-        - name: Check reboot-required marker (Debian/Ubuntu)
-          ansible.builtin.stat:
-            path: /var/run/reboot-required
-          register: update_reboot_marker
-          when:
-            - ansible_facts['pkg_mgr'] == "apt"
-
-        - name: Ensure needs-restarting is available (RedHat family)
-          ansible.builtin.package:
-            name: "{{ 'yum-utils' if ansible_facts['pkg_mgr'] == 'yum' else 'dnf-utils' }}"
-            state: present
-          when:
-            - ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
-
-        - name: Check needs-restarting (RedHat family)
-          ansible.builtin.command:
-            cmd: needs-restarting -r
-          register: update_needs_restarting
-          changed_when: false
-          failed_when:
-            - update_needs_restarting.rc not in [ 0, 1 ]
-          when:
-            - ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
-
-    - name: Reboot
-      ansible.builtin.reboot:
-      when: >-
-        (not update_reboot_only_if_required)
-        or (ansible_facts['pkg_mgr'] == "apt"
-            and (update_reboot_marker.stat.exists | default(false)))
-        or (ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
-            and ((update_needs_restarting.rc | default(1)) == 1))
-        or (ansible_facts['pkg_mgr'] not in [ "apt", "dnf", "dnf5", "yum" ])
+    - >-
+      (not update_reboot_only_if_required)
+      or (ansible_facts['pkg_mgr'] == "apt"
+          and (update_reboot_marker.stat.exists | default(false)))
+      or (ansible_facts['pkg_mgr'] in [ "dnf", "dnf5", "yum" ]
+          and ((update_needs_restarting.rc | default(1)) == 1))
+      or (ansible_facts['pkg_mgr'] not in [ "apt", "dnf", "dnf5", "yum" ])
