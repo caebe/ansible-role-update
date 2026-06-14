@@ -15,6 +15,15 @@ update_cache_valid_time: 1
 # "no": Never reboot when packages have changed.
 update_reboot: true
 
+# When "update_reboot" is enabled, only reboot when the system actually reports
+# that a reboot is required, instead of after any package change.
+# "yes": Reboot only if required (apt: /var/run/reboot-required,
+#        dnf/yum: "needs-restarting -r").
+# "no":  Reboot whenever packages changed (original behaviour).
+# Package managers without a reliable "reboot required" marker
+# (apk, pacman, zypper) always reboot when this is enabled.
+update_reboot_only_if_required: false
+
 # You can exclude certain packages from being updated.
 # Some Ansible modules do not support this option, so this variable works for only:
 # - apt
